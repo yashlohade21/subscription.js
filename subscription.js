@@ -12,8 +12,8 @@ import {
     BackHandler,
 } from "react-native";
 import {
-    API_BASE_URL, 
-    LOGIN_ENDPOINT, USER_PROFILE_ENDPOINT,
+    API_BASE_URL,
+    LOGIN_ENDPOINT,
     CONTACT_US, ERROR_MESSAGE
 } from "../Constant/ConstantApi";
 // import Background from "../Components/Background";
@@ -48,8 +48,6 @@ const Subscription = ({ route }) => {
     const [selectedItem, setSelectedItem] = useState(basicPlanIndex);
     const [SelectPlan, setSelectPlan] = useState(null);
     const colors = useTheme().colors;
-    const isFocused = useIsFocused();
-    const [userData, setUserData] = useState(null); // User profile data
     const theme = useTheme().colors.themeColor;
     const [alertInfo, setAlertInfo] = useState({ type: null, message: '' });
     // const [giveAlert, setGiveAlert] = useState(f)
@@ -180,12 +178,6 @@ const Subscription = ({ route }) => {
         }, [navigation])
     );
 
-    useEffect(() => {
-        if (isFocused) {
-          getUserProfile();
-        }
-      }, [isFocused]);
-
     if (colors.themeColor === '#FFFFFF') {
         darkMode = false
     }
@@ -206,78 +198,38 @@ const Subscription = ({ route }) => {
         return total;
     };
 
-    const getUserProfile = async () => {
+    const handleSuccess = async (selectedPlan, data) => {
         try {
-            const authToken = await AsyncStorage.getItem("authToken");
-            const token = await messaging().getToken();
-
-            const myHeaders = new Headers();
-            myHeaders.append("Authorization", authToken);
-            myHeaders.append("X-Notification-Token", token);
-
-            const requestOptions = {
-                method: "GET",
-                headers: myHeaders,
-                redirect: "follow",
-            };
-
-            const response = await fetch(`${API_BASE_URL}${USER_PROFILE_ENDPOINT}`, requestOptions);
-
-            if (response.ok) {
-                const data = await response.json(); // Parse the JSON response
-                setUserData(data); // Store user profile data
-            } else {
-                handleErrors(response);
-            }
-        } catch (error) {
-            console.error("Error fetching user profile:", error);
-        }
-    };
-
-      const handleSuccess = async (selectedPlan, paymentData) => {
-        try {
-            const authToken = await AsyncStorage.getItem("authToken");
-            const token = await messaging().getToken();
-
-            // Ensure userData is available before proceeding
-            if (!userData) {
-                console.error("User data not available");
-                return;
-            }
-
             // Prepare the transaction data
             const transactionData = {
-                name: userData.name,
-                email: userData.email,
                 plan: selectedPlan,
-                razorpay_payment_id: paymentData.razorpay_payment_id,
-                razorpay_order_id: paymentData.razorpay_order_id,
-                razorpay_signature: paymentData.razorpay_signature,
+                razorpay_payment_id: data.razorpay_payment_id,
+                razorpay_order_id: data.razorpay_order_id,
+                razorpay_signature: data.razorpay_signature,
                 amount: getTotal(), // Assuming getTotal() returns the transaction amount
-                createdAt: new Date().toISOString(), // Timestamp in ISO format
+                createdAt: new Date().toISOString() // Timestamp in ISO format
             };
-
+    
             // Firebase Realtime Database URL (update to match your Firebase project)
-            const firebaseUrl = 'https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json';
-
+            const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
+    
             // Send the POST request to store transaction data in Firebase
             const response = await fetch(firebaseUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': authToken,
-                    'X-Notification-Token': token,
                 },
                 body: JSON.stringify(transactionData), // Convert the transaction data to JSON
             });
-
+    
             // Check for successful response
             if (response.ok) {
-                setAlertInfo({
-                    type: "success",
-                    message: "Payment successful! Transaction details have been stored.",
+                setAlertInfo({ 
+                    type: "success", 
+                    message: "Payment successful! Transaction details have been stored." 
                 });
             } else {
+                // Handle non-200 HTTP responses
                 const errorData = await response.json();
                 throw new Error(`Failed to store transaction details: ${errorData.error}`);
             }
@@ -285,7 +237,7 @@ const Subscription = ({ route }) => {
             console.error("Error storing transaction: ", error);
             setAlertInfo({
                 type: "alert",
-                message: "An error occurred while storing transaction details. Please try again.",
+                message: "An error occurred while storing transaction details. Please try again."
             });
         }
     };
@@ -305,9 +257,9 @@ const Subscription = ({ route }) => {
                         name: 'FILI : Gamified Financial Literacy App',
                         order_id: '', // Replace this with an order_id created using Orders API.
                         prefill: {
-                            email: userData?.email || '', // Pre-fill with user's email
-                            contact: userData?.mobileNumber || '', // Pre-fill with user's mobile number
-                            name: userData?.name || '' // Pre-fill with user's name
+                            email: 'gaurav.kumar@example.com',
+                            contact: '9191919191',
+                            name: 'Gaurav Kumar'
                         },
                         theme: { color: '#292865' }
                     };
