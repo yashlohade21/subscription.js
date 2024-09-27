@@ -26,6 +26,7 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import RazorpayCheckout from 'react-native-razorpay';
 import { GlobalStateContext } from "../Context/GlobalStateContext";
 import { allErrorCodes, getErrorResponse } from "../store/paymentErrorResponse";
+import { ref, push } from "firebase/database";
 
 
 // import {
@@ -201,70 +202,58 @@ const Subscription = ({ route }) => {
 
     const handleSuccess = async (selectedPlan, data) => {
         try {
-            const authToken = await AsyncStorage.getItem('authToken');
-
-            const myHeaders = new Headers();
-            myHeaders.append('Content-Type', 'application/json');
-            myHeaders.append('Authorization', authToken);
-            const token = await messaging().getToken();
-            myHeaders.append("X-Notification-Token", token);
-
-            // Prepare the transaction data
+          const authToken = await AsyncStorage.getItem("authToken");
+      
+          if (!authToken) {
+            throw new Error("User is not authenticated. Please log in again.");
+          }
+      
+          // Fetch the user's profile data
+          const response_api = await fetch(`https://api.hibudgeting.com/api/v1/users/profile`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${authToken}`, // Include "Bearer" before the token
+            },
+          });
+      
+          // Check if the user profile fetch was successful
+          if (response_api.ok) {
+            const userData = await response_api.json();
+            setUserData(userData);
+      
+            // Store the transaction data in Firebase
             const transactionData = {
-                email: userData.email,
-                plan: selectedPlan,
-                razorpay_payment_id: data.razorpay_payment_id,
-                razorpay_order_id: data.razorpay_order_id,
-                razorpay_signature: data.razorpay_signature,
-                amount: getTotal(), // Assuming getTotal() returns the transaction amount
-                createdAt: new Date().toISOString() // Timestamp in ISO format
+              email: userData.email,
+              plan: selectedPlan,
+              razorpay_payment_id: data.razorpay_payment_id,
+              razorpay_order_id: data.razorpay_order_id,
+              razorpay_signature: data.razorpay_signature,
+              amount: getTotal(),
+              createdAt: new Date().toISOString(),
             };
-    
-            // Firebase Realtime Database URL (update to match your Firebase project)
-            const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
-    
-            const response_api = await fetch(
-                `${API_BASE_URL}${USER_PROFILE_ENDPOIN}`, // Update the URL to your endpoint
-                requestOptions
-            );
-
-            // Send the POST request to store transaction data in Firebase
-            const response = await fetch(firebaseUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(transactionData), // Convert the transaction data to JSON
-            });
-    
-            const requestOptions = {
-                method: 'GET',
-                headers: myHeaders,
-                body: transactionData,
-                redirect: 'follow',
-              };
-
-            // Check for successful response
-            if (response.ok) {
-                const userData = await response_api.json()
-                setUserData(userData);
-                setAlertInfo({ 
-                    type: "success", 
-                    message: "Payment successful! Transaction details have been stored." 
-                });
-            } else {
-                // Handle non-200 HTTP responses
-                const errorData = await response.json();
-                throw new Error(`Failed to store transaction details: ${errorData.error}`);
-            }
-        } catch (error) {
-            console.error("Error storing transaction: ", error);
+      
+            // Use `push` to add the transaction as a new entry in the "transactions" node
+            const transactionsRef = ref(database, "transactions");
+            await push(transactionsRef, transactionData);
+      
             setAlertInfo({
-                type: "alert",
-                message: "An error occurred while storing transaction details. Please try again."
+              type: "success",
+              message: "Payment successful! Transaction details have been stored.",
             });
+          } else {
+            // Handle non-200 HTTP responses from the API
+            const errorData = await response_api.json();
+            throw new Error(`Failed to fetch user profile: ${errorData.error || response_api.statusText}`);
+          }
+        } catch (error) {
+          console.error("Error storing transaction: ", error);
+          setAlertInfo({
+            type: "alert",
+            message: "An error occurred while storing transaction details. Please try again.",
+          });
         }
-    };
+      };
     
     
         const handleSelectPlanPress = () => {
@@ -281,9 +270,9 @@ const Subscription = ({ route }) => {
                         name: 'FILI : Gamified Financial Literacy App',
                         order_id: '', // Replace this with an order_id created using Orders API.
                         prefill: {
-                            email: userData.email,
+                            email: 'userData.email',
                             contact: '9191919191',
-                            name: userData.name
+                            name: 'userData.name'
                         },
                         theme: { color: '#292865' }
                     };
