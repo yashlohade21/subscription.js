@@ -1,31 +1,20 @@
 import React, { useState, useEffect, useCallback, useContext } from "react";
 import {
-    View,
-    Text,
-    TouchableOpacity,
-    ScrollView,
-    Image,
-    StyleSheet,
-    Dimensions,
-    Platform,
-    Alert,
-    BackHandler,
-} from "react-native";
+    View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, Dimensions, Platform, Alert, BackHandler} from "react-native";
 import {
-    API_BASE_URL,
-    LOGIN_ENDPOINT,
-    CONTACT_US, ERROR_MESSAGE
-} from "../Constant/ConstantApi";
+    API_BASE_URL, LOGIN_ENDPOINT, USER_PROFILE_ENDPOIN, CONTACT_US, ERROR_MESSAGE } from "../Constant/ConstantApi";
 // import Background from "../Components/Background";
 import { useTheme, useIsFocused } from "@react-navigation/native";
 import plans from "../store/subscriptionPlans";
 import FontAwesome5 from "react-native-vector-icons/FontAwesome5";
 import CustomAlert from "./CustomAlert";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import RazorpayCheckout from 'react-native-razorpay';
 import { GlobalStateContext } from "../Context/GlobalStateContext";
 import { allErrorCodes, getErrorResponse } from "../store/paymentErrorResponse";
+import messaging from '@react-native-firebase/messaging';
+
 
 
 // import {
@@ -43,7 +32,8 @@ const Subscription = ({ route }) => {
     const { selectedIndex } = route.params || {};
     const navigation = useNavigation();
     const [IsSub, setIsSub] = useState(false);
-
+    const isFocused = useIsFocused();
+    const [userData, setUserData] = useState(null);
     const basicPlanIndex = plans.findIndex(plan => plan.plantype === "Basic");
     const [selectedItem, setSelectedItem] = useState(basicPlanIndex);
     const [SelectPlan, setSelectPlan] = useState(null);
@@ -198,137 +188,219 @@ const Subscription = ({ route }) => {
         return total;
     };
 
-    const handleSuccess = async (selectedPlan, data) => {
+    useEffect(() => {
+        if (isFocused) {
+          getUserProfile();
+        }
+    }, [isFocused]);
+    
+    const getUserProfile = async () => {
         try {
-            // Prepare the transaction data
-            const transactionData = {
-                plan: selectedPlan,
-                razorpay_payment_id: data.razorpay_payment_id,
-                razorpay_order_id: data.razorpay_order_id,
-                razorpay_signature: data.razorpay_signature,
-                amount: getTotal(), // Assuming getTotal() returns the transaction amount
-                createdAt: new Date().toISOString() // Timestamp in ISO format
-            };
+          const authToken = await AsyncStorage.getItem("authToken");
+          const myHeaders = new Headers();
+          myHeaders.append("Authorization", authToken);
+          const token = await messaging().getToken();
+          myHeaders.append("X-Notification-Token", token);
+          
+          const requestOptions = {
+            method: "GET",
+            headers: myHeaders,
+            redirect: "follow",
+          };
     
-            // Firebase Realtime Database URL (update to match your Firebase project)
-            const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
+          const response = await fetch(
+            `${API_BASE_URL}${USER_PROFILE_ENDPOIN}`, // Update the URL to your endpoint
+            requestOptions
+          );
     
-            // Send the POST request to store transaction data in Firebase
-            const response = await fetch(firebaseUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(transactionData), // Convert the transaction data to JSON
-            });
-    
-            // Check for successful response
-            if (response.ok) {
-                setAlertInfo({ 
-                    type: "success", 
-                    message: "Payment successful! Transaction details have been stored." 
-                });
-            } else {
-                // Handle non-200 HTTP responses
-                const errorData = await response.json();
-                throw new Error(`Failed to store transaction details: ${errorData.error}`);
+          if (response.ok) {
+            const userData = await response.json(); // Parse the JSON response
+            setUserData(userData); // Set the user profile data in state
+          } else {
+            if (response.status === 401) {
+              //401 Unauthorize
+              setErrorMessage(
+                ERROR_MESSAGE
+              );
+            } else if (response.status === 500) {
+              // 500 Internal Server error 
+              setErrorMessage(
+                ERROR_MESSAGE
+              );
+            } else if (response.status === 502) {
+              // 502 gateway error
+              setErrorMessage(
+                ERROR_MESSAGE
+              );
+            } else if (response.status === 504) {
+              //504 gateway time out error 
+              setErrorMessage(
+                ERROR_MESSAGE
+              );
             }
+          }
         } catch (error) {
-            console.error("Error storing transaction: ", error);
-            setAlertInfo({
-                type: "alert",
-                message: "An error occurred while storing transaction details. Please try again."
-            });
+          console.error(error);
         }
     };
     
-    
-        const handleSelectPlanPress = () => {
-            if (selectedItem !== null) {
-                var selectedPlan = plans[selectedItem].plantype;
+    const handleSelectPlanPress = async () => {
+        try {            
+            const authToken = await AsyncStorage.getItem('authToken');
 
-                const handlePayment = () => {
-                    var options = {
+            const myHeaders = new Headers();
+            myHeaders.append('Content-Type', 'application/json');
+            myHeaders.append('Authorization', authToken);
+            const token = await messaging().getToken();
+            myHeaders.append("X-Notification-Token", token);
+            // Request options for fetching user profile
+            const requestOptions = {
+                method: 'GET',
+                headers: myHeaders,
+            };
+            
+            // Fetch user profile data
+            const response = await fetch(`${API_BASE_URL}${USER_PROFILE_ENDPOIN}`, requestOptions);
+            
+            // Handle response
+            if (!response.ok) {
+                throw new Error('USER DATA IS NOT BEING FETCHED');
+            }
+            
+            const result = await response.json();
+            
+            // Assuming userData is updated dynamically with fetched data
+            userData.name = result.name;
+            userData.email = result.email;
+            userData.mobileNumber = result.mobileNumber;
+            
+            if (selectedItem !== null) {
+                const selectedPlan = plans[selectedItem].plantype;
+                
+                // Handle Payment
+                const handlePayment = async () => {
+                    const options = {
                         description: 'Credits towards consultation',
                         image: require('../../assets/User_Logo.webp'),
                         currency: 'INR',
                         key: 'rzp_test_2DZeUPwGDBDQQn',
-                        amount: getTotal() * 100,
-                        name: 'FILI : Gamified Financial Literacy App',
-                        order_id: '', // Replace this with an order_id created using Orders API.
+                        amount: getTotal() * 100, // Amount in paise (Razorpay expects amount in paise)
+                        name: 'FILI: Gamified Financial Literacy App',
                         prefill: {
-                            email: 'gaurav.kumar@example.com',
-                            contact: '9191919191',
-                            name: 'Gaurav Kumar'
+                            name: userData.name || '',
+                            email: userData.email || '',
+                            contact: userData.mobileNumber || '',
                         },
                         theme: { color: '#292865' }
                     };
+                    
+                    try {
+                        // Open Razorpay payment gateway
+                        const data = await RazorpayCheckout.open(options);
 
-                    RazorpayCheckout.open(options).then((data) => {
-                        // handle success
-                        // alert(`Success: ${data.razorpay_payment_id}`);
-                        handleSuccess(selectedPlan, data);
-                    }).catch((error) => {
-                        // handle failure
+                        // Payment successful
+                        updateSubscriptionPlan(selectedPlan, 'true', data.razorpay_payment_id);  // Set 'true' and include payment ID
+                        setSelectSubscriptionPlan({ type: selectedPlan, bool: true });
 
-                        let responseMessage;
-                        let errorCode = "Error Code";
-                        if (error.code) {
-                            errorCode = error.code;
-                        }
+                        // Successful transaction data
+                        const transactionData = {
+                            user: {
+                                name: userData.name,
+                                email: userData.email,
+                                contact: userData.mobileNumber,
+                            },
+                            plan: selectedPlan,
+                            razorpay_payment_id: data.razorpay_payment_id,
+                            razorpay_order_id: data.razorpay_order_id,
+                            razorpay_signature: data.razorpay_signature,
+                            payment_method: data.method,  // Store the payment method used by the user
+                            amount: getTotal(),
+                            createdAt: new Date().toISOString(),
+                            status: 'success'  // Add a status field for successful transactions
+                        };
 
-                        if (error) {
-                            if (!allErrorCodes.includes(errorCode)) {
-                                if (error.description) {
-                                    const errorMessage = error.description;
-                                    const startIndex = errorMessage.indexOf('"description":"');
-                                    if (startIndex !== -1) {
-                                        const descriptionStart = startIndex + '"description":"'.length;
-                                        const descriptionEnd = errorMessage.indexOf('"', descriptionStart);
-                                        const description = errorMessage.substring(descriptionStart, descriptionEnd);
-                                        responseMessage = `${description}`;
-                                    } else {
-                                        errorCode = "Error Code"; // comment if want to see error
-                                        responseMessage = errorMessage.replace(/_/g, ' ').toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                                        responseMessage = responseMessage.replace(/Net::err/g, '')
-                                    }
-                                } else {
-                                    errorCode = "Error Description Not Found"
-                                    responseMessage = "An unknown error occurred. error.description";
-                                }
-                            } else {
-                                responseMessage = getErrorResponse(errorCode);
-                                errorCode = errorCode.replace(/_/g, ' ').toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                            }
-                        } else {
-                            errorCode = "Error Codes Not Found"
-                            responseMessage = "An unknown error occurred.";
-                        }
-
-                        // let formattedErrorCode = (errorCode || 'Error Code').replace(/_/g, ' ').toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                        if (errorCode == "Error Code") {
-                            errorCode = " "
-                        }
-                        setAlertInfo({
-                            type: "alert",
-                            message: `${errorCode}\n ${responseMessage}\n\nKindly retry. If the problem continues, \n`,
-                            link: CONTACT_US,
-                            link_text: "let us know"
+                        // Store success transaction data in Firebase
+                        const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
+                        const firebaseResponse = await fetch(firebaseUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(transactionData),
                         });
-                    });
-                };
 
+                        if (firebaseResponse.ok) {
+                            setAlertInfo({
+                                type: "success",
+                                message: "Payment successful!",
+                            });
+                        } else {
+                            const errorData = await firebaseResponse.json();
+                            throw new Error(`Failed to store transaction details: ${errorData.error}`);
+                        }
+
+                    } catch (error) {
+                        console.error("Error during payment: ", error);
+
+                        // Failed transaction data
+                        const failedTransactionData = {
+                            user: {
+                                name: userData.name,
+                                email: userData.email,
+                                contact: userData.mobileNumber,
+                            },
+                            plan: selectedPlan,
+                            error: error.message || 'Unknown error', // Capture error message
+                            payment_method: error?.method || 'Unknown',  // Capture payment method if available in error
+                            amount: getTotal(),
+                            createdAt: new Date().toISOString(),
+                            status: 'failed'  // Add a status field for failed transactions
+                        };
+
+                        // Store failed transaction data in Firebase
+                        const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
+                        const firebaseResponse = await fetch(firebaseUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(failedTransactionData),
+                        });
+
+
+                        if (firebaseResponse.ok) {
+                            setAlertInfo({
+                                type: "failed",
+                                message: "Payment failed! Please try again.",
+                            });
+                        } else {
+                            const errorData = await firebaseResponse.json();
+                            throw new Error(`Failed to store transaction details: ${errorData.error}`);
+                        }
+                    }
+                };
+                
+                
+                // Plan selection logic
                 if (selectedPlan === "Free") {
                     updateSubscriptionPlan(selectedPlan, 'false', null);
                     setSelectSubscriptionPlan({ type: selectedPlan, bool: false });
                     setAlertInfo({ type: "success", message: "Congratulations, You are a free user now!" });
                 } else if (selectedPlan === "Basic" || selectedPlan === "Premium") {
-                    handlePayment();
+                    await handlePayment(); // Trigger payment process
                 } else {
                     setAlertInfo({ type: "alert", message: "Oops! You need to choose a valid plan first." });
                 }
+            } else {
+                setAlertInfo({ type: "alert", message: "Please select a plan before proceeding." });
             }
-        };
+        } catch (error) {
+            console.error("Error in handleSelectPlanPress: ", error);
+            alert(`Error: ${error.message}`);
+        }
+    };
+    
+      
 
 
         return (
@@ -339,6 +411,7 @@ const Subscription = ({ route }) => {
                     <CustomAlert
                         type={errorMessage === "No subscription record found" ? "warning" : "error"}
                         message={errorMessage}
+                        closeTextbutton="Close"
                         onClose={async () => {
                             setErrorMessage(null);
                             // Use reset to navigate back to the Login screen and reset the stack
@@ -353,6 +426,7 @@ const Subscription = ({ route }) => {
                     <CustomAlert
                         type="success"
                         message={alertInfo.message}
+                        closeTextbutton="Let's Go"
                         onClose={() => {
                             setAlertInfo({ type: null, message: '' });
                             navigation.navigate("HomeScreen");
@@ -361,7 +435,18 @@ const Subscription = ({ route }) => {
                         secondButtonText="Upgrade"
                         secondButton_onClose={() => {
                             setAlertInfo({ type: null, message: '' });
-                            navigation.navigate("Subscription");
+                            navigation.navigate("HomeScreen");
+                        }}
+                    />
+                )}
+                {alertInfo.type === "failed" && (
+                    <CustomAlert
+                        type="failed"
+                        message={alertInfo.message}
+                        closeTextbutton="Try Again"
+                        onClose={() => {
+                            setAlertInfo({ type: null, message: '' });
+                            navigation.navigate("HomeScreen");
                         }}
                     />
                 )}
@@ -371,19 +456,13 @@ const Subscription = ({ route }) => {
                         message={alertInfo.message}
                         link={CONTACT_US}
                         link_text="let us know"
+                        closeTextbutton="Close"
                         onClose={() => {
                             setAlertInfo({ type: null, message: '' });
                             navigation.navigate("Subscription");
                         }}
                     />
                 )}
-
-                <View style={styles(colors).subMainImage}>
-                    <Image
-                        source={require("../../assets/Streak.webp")}
-                        style={{ resizeMode: "contain", height: 120, width: "30%" }}
-                    />
-                </View>
 
                 <View style={{ marginHorizontal: Dimensions.get("window").width * 0.02 }}>
                     <Text style={styles(colors).subHeadTxt}>Upgrade Your Plan!</Text>
@@ -403,6 +482,15 @@ const Subscription = ({ route }) => {
                         </View>
                     </TouchableOpacity>
                 ))}
+
+                <TouchableOpacity
+                    onPress={
+                        handleSelectPlanPress
+                    }
+                    style={[styles(colors).subSelectPlanButton, { backgroundColor: "#4fbdfb" }]}
+                >
+                    <Text style={styles(colors).subSelectPlanButtonTxt}>Subscribe for ₹{getTotal()}</Text>
+                </TouchableOpacity>
 
                 {SelectPlan
                     ? <Text style={[styles(colors).subTxtH1, { marginTop: Dimensions.get("window").height * 0.02 }]}>WHY?</Text>
@@ -424,15 +512,6 @@ const Subscription = ({ route }) => {
                 <View style={{ alignSelf: "center" }}>
                     <Text style={styles(colors).subFeatureText}>info@arglyeenigma.com</Text>
                 </View>
-
-                <TouchableOpacity
-                    onPress={
-                        handleSelectPlanPress
-                    }
-                    style={[styles(colors).subSelectPlanButton, { backgroundColor: "#4fbdfb" }]}
-                >
-                    <Text style={styles(colors).subSelectPlanButtonTxt}>Subscribe for ₹{getTotal()}</Text>
-                </TouchableOpacity>
 
             </ScrollView>
         )
