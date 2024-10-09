@@ -141,17 +141,21 @@ const Subscription = ({ route }) => {
     };
 
     useEffect(() => {
-        const basicPlanIndex = plans.findIndex(plan => plan.plantype === "Basic");
-        if (basicPlanIndex !== -1 && selectedIndex == null) {
-            setSelectedItem(basicPlanIndex);
-            setSelectPlan(true);
+        // Set the selected plan if passed from the previous screen (popup)
+        if (selectedIndex !== undefined && selectedIndex !== null) {
+            setSelectedItem(selectedIndex); // Use the selected plan index passed from the pop-up screen
+        } else {
+            // Default to the Basic plan if nothing is passed
+            const basicPlanIndex = plans.findIndex(plan => plan.plantype === "Basic");
+            if (basicPlanIndex !== -1) {
+                setSelectedItem(basicPlanIndex);
+            }
         }
-        else {
-            setSelectedItem(selectedIndex);
-        }
-
+    
         fetchData();
-    }, []);
+    }, [selectedIndex]);
+    
+    
 
     useFocusEffect(
         useCallback(() => {
@@ -244,10 +248,46 @@ const Subscription = ({ route }) => {
         }
     };
     
+    const handleSuccess = async (selectedPlan, data) => {
+        // Handle success
+        // alert(`Success: ${data.razorpay_payment_id}`);
+        try {
+            updateSubscriptionPlan(selectedPlan, 'true', data.razorpay_payment_id);
+            setSelectSubscriptionPlan({ type: selectedPlan, bool: true });
+
+            // const newData = {
+            //     transactionKey: data.razorpay_payment_id,
+            //     subscriptionPlan: selectedPlan,
+            //     bool: true // Assuming this is the boolean value to be updated
+            // };
+
+            // await setData(newData);
+
+        } catch (error) {
+            console.error("Error handling success:", error);
+            setErrorMessage("An error occurred while processing your request.");
+        }
+
+        try {
+            // Reset buffer flags
+            await AsyncStorage.setItem('zeroDayBufferSeen', 'false');
+            await AsyncStorage.setItem('sevenDayBufferSeen', 'false');
+            await AsyncStorage.setItem('fifteenDayBufferSeen', 'false');
+
+            const seenSevenDayBuffer = await AsyncStorage.getItem('sevenDayBufferSeen');
+            const seenFifteenDayBuffer = await AsyncStorage.getItem('fifteenDayBufferSeen');
+            const seenZeroDayBuffer = await AsyncStorage.getItem('zeroDayBufferSeen');
+            console.log(seenZeroDayBuffer, seenSevenDayBuffer, seenFifteenDayBuffer)
+        } catch (error) {
+            console.error("Error Setting Buffer Days:", error);
+        }
+    };
+
+    
     const handleSelectPlanPress = async () => {
         try {            
             const authToken = await AsyncStorage.getItem('authToken');
-
+      
             const myHeaders = new Headers();
             myHeaders.append('Content-Type', 'application/json');
             myHeaders.append('Authorization', authToken);
@@ -297,11 +337,10 @@ const Subscription = ({ route }) => {
                     try {
                         // Open Razorpay payment gateway
                         const data = await RazorpayCheckout.open(options);
-
+      
                         // Payment successful
-                        updateSubscriptionPlan(selectedPlan, 'true', data.razorpay_payment_id);  // Set 'true' and include payment ID
-                        setSelectSubscriptionPlan({ type: selectedPlan, bool: true });
-
+                        handleSuccess(selectedPlan, data);
+      
                         // Successful transaction data
                         const transactionData = {
                             user: {
@@ -318,7 +357,7 @@ const Subscription = ({ route }) => {
                             createdAt: new Date().toISOString(),
                             status: 'success'  // Add a status field for successful transactions
                         };
-
+      
                         // Store success transaction data in Firebase
                         const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
                         const firebaseResponse = await fetch(firebaseUrl, {
@@ -328,7 +367,7 @@ const Subscription = ({ route }) => {
                             },
                             body: JSON.stringify(transactionData),
                         });
-
+      
                         if (firebaseResponse.ok) {
                             setAlertInfo({
                                 type: "success",
@@ -338,10 +377,10 @@ const Subscription = ({ route }) => {
                             const errorData = await firebaseResponse.json();
                             throw new Error(`Failed to store transaction details: ${errorData.error}`);
                         }
-
+      
                     } catch (error) {
                         console.error("Error during payment: ", error);
-
+      
                         // Failed transaction data
                         const failedTransactionData = {
                             user: {
@@ -356,7 +395,7 @@ const Subscription = ({ route }) => {
                             createdAt: new Date().toISOString(),
                             status: 'failed'  // Add a status field for failed transactions
                         };
-
+      
                         // Store failed transaction data in Firebase
                         const firebaseUrl = `https://finedu-decdc-default-rtdb.firebaseio.com/transactions.json`;
                         const firebaseResponse = await fetch(firebaseUrl, {
@@ -366,8 +405,8 @@ const Subscription = ({ route }) => {
                             },
                             body: JSON.stringify(failedTransactionData),
                         });
-
-
+      
+      
                         if (firebaseResponse.ok) {
                             setAlertInfo({
                                 type: "failed",
@@ -398,10 +437,7 @@ const Subscription = ({ route }) => {
             console.error("Error in handleSelectPlanPress: ", error);
             alert(`Error: ${error.message}`);
         }
-    };
-    
-      
-
+      };
 
         return (
             // <Background>
@@ -411,7 +447,7 @@ const Subscription = ({ route }) => {
                     <CustomAlert
                         type={errorMessage === "No subscription record found" ? "warning" : "error"}
                         message={errorMessage}
-                        closeTextbutton="Close"
+                        closeTextbutton = "Close"
                         onClose={async () => {
                             setErrorMessage(null);
                             // Use reset to navigate back to the Login screen and reset the stack
@@ -446,6 +482,12 @@ const Subscription = ({ route }) => {
                         closeTextbutton="Try Again"
                         onClose={() => {
                             setAlertInfo({ type: null, message: '' });
+                            navigation.navigate("Subscription");
+                        }}
+                        secondButton={!SelectSubscriptionPlan.bool ? true : undefined}
+                        secondButtonText="Close"
+                        secondButton_onClose={() => {
+                            setAlertInfo({ type: null, message: '' });
                             navigation.navigate("HomeScreen");
                         }}
                     />
@@ -456,7 +498,6 @@ const Subscription = ({ route }) => {
                         message={alertInfo.message}
                         link={CONTACT_US}
                         link_text="let us know"
-                        closeTextbutton="Close"
                         onClose={() => {
                             setAlertInfo({ type: null, message: '' });
                             navigation.navigate("Subscription");
@@ -469,19 +510,19 @@ const Subscription = ({ route }) => {
                 </View>
 
                 {plans.map((items, index) => (
-                    <TouchableOpacity key={index} onPress={() => handleItemPress(index)}>
-                        <View style={[styles(items).subPlanContainer, selectedItem === index && styles(items).subselectedPlanContainerStyle]}>
-                            <View style={{ marginLeft: 10 }}>
-                                <Text style={[styles(items).subTxtH1, { fontWeight: "900", fontSize: Dimensions.get("window").width * 0.07, color: colors.text }]}>{items.plantype}</Text>
-                                <Text style={[styles(items).subSmlTxt, { color: colors.text }]}>{`₹ ${(items.cost / items.duration).toFixed(2)}/Monthly`}</Text>
-                            </View>
-                            <View>
-                                <Text style={[styles(items).subTxtH1, { fontWeight: "900", fontSize: Dimensions.get("window").width * 0.07, color: colors.text }]}>{items.plantxt}</Text>
-                                <Text style={[styles(items).subSmlTxt, { color: colors.text }]}>{items.costtext}</Text>
-                            </View>
+                <TouchableOpacity key={index} onPress={() => handleItemPress(index)}>
+                    <View style={[styles(items).subPlanContainer, selectedItem === index && styles(items).subselectedPlanContainerStyle]}>
+                        <View style={{ marginLeft: 10 }}>
+                            <Text style={[styles(items).subTxtH1, { fontWeight: "900", fontSize: Dimensions.get("window").width * 0.07, color: colors.text }]}>
+                                {items.plantype}
+                            </Text>
+                            <Text style={[styles(items).subSmlTxt, { color: colors.text }]}>
+                                ₹ {(items.cost / items.duration).toFixed(2)}/Monthly
+                            </Text>
                         </View>
-                    </TouchableOpacity>
-                ))}
+                    </View>
+                </TouchableOpacity>
+            ))}
 
                 <TouchableOpacity
                     onPress={
